@@ -1,0 +1,87 @@
+pipeline {
+    agent any 
+    
+    options {
+        buildDiscarder(logRotator(
+            daysToKeepStr: '30', 
+            numToKeepStr: '2'
+        ))
+    }
+    
+    tools {
+        nodejs 'Nodejs'
+    }
+    
+    environment {
+        docker_cred = credentials('docker-credd')
+        AWS_DEFAULT_REGION = 'eu-north-1'
+    }
+    
+    stages {
+        stage('checkout') {
+            steps {
+                checkout scmGit(
+                    branches: [[name: '*/main']], 
+                    extensions: [], 
+                    userRemoteConfigs: [[url: 'https://github.com/Alaaibrahim2/nodejs-app.git']]
+                )
+            }
+        }
+        
+        stage('nodejs') {
+            steps {
+                sh 'node -v'
+                sh 'npm -v'
+                sh 'npm install'
+            }
+        }
+        
+        stage('docker-build') {
+            steps {
+                sh 'docker -v'
+                sh 'docker build -t alaai/jenkins-nodejs:latest .'
+                sh 'echo $docker_cred_PSW | docker login -u $docker_cred_USR --password-stdin'
+                sh 'docker push alaai/jenkins-nodejs:latest'
+            }
+        }
+        
+        stage('aws') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', 
+                                credentialsId: 'aws-kkey']]) {
+                    sh 'aws sts get-caller-identity'
+                    sh 'aws ec2 describe-instances'
+                }
+            }
+        }
+        
+        stage('k8s') {
+            steps {
+                sh 'kubectl version --client'
+            }
+        }
+        
+        stage('deploy eks') {
+            steps {
+                
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', 
+                                credentialsId: 'aws-kkey']]) {
+                    sh '''
+                       
+                        aws eks update-kubeconfig --region eu-north-1 --name my-first-cluster
+                        
+                        
+                        kubectl get nodes
+                        
+                        
+                        kubectl apply -f Application.yaml
+                        
+                        
+                        kubectl get pods
+                        kubectl get services
+                    '''
+                }
+            }
+        }
+    }
+}
